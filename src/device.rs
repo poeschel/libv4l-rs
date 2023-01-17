@@ -167,6 +167,39 @@ impl Device {
         Ok(controls)
     }
 
+    /// Returns the edid blocks, if your device has edid
+    pub fn query_edid(&self) -> io::Result<Vec<u8>> {
+        unsafe {
+            let mut v4l2_edid: v4l2_edid = mem::zeroed();
+            v4l2::ioctl(
+                self.handle().fd(),
+                v4l2::vidioc::VIDIOC_G_EDID,
+                &mut v4l2_edid as *mut _ as *mut std::os::raw::c_void,
+            )?;
+
+            println!("edid.blocks:{}", v4l2_edid.blocks);
+            let blocks = match usize::try_from(v4l2_edid.blocks * 128) {
+                Ok(b) => b,
+                Err(_e) => {
+                    return Err(io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "You seem to have waaaaay to many edid blocks.",
+                            ));
+                }
+            };
+
+            let mut vec = Vec::with_capacity(blocks);
+            v4l2_edid.edid = vec.as_mut_ptr();
+            v4l2::ioctl(
+                self.handle().fd(),
+                v4l2::vidioc::VIDIOC_G_EDID,
+                &mut v4l2_edid as *mut _ as *mut std::os::raw::c_void,
+            )?;
+
+            Ok(vec)
+        }
+    }
+
     /// Returns the control value for an ID
     ///
     /// # Arguments
@@ -321,6 +354,38 @@ impl Device {
                 self.handle().fd(),
                 v4l2::vidioc::VIDIOC_S_EXT_CTRLS,
                 &mut controls as *mut _ as *mut std::os::raw::c_void,
+            )
+        }
+    }
+
+    pub fn set_edid(&self, edid: &mut [u8]) -> io::Result<()> {
+        let len = edid.len();
+        if len % 128 != 0 {
+            return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "The provided edid data has invalid length. One edid block is 128 bytes. Your edid block is not divisible by 128.",
+                    ));
+        }
+
+        let blocks = match u32::try_from(len / 128) {
+            Ok(b) => b,
+            Err(_e) => {
+            return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "You seem to have waaaaay to many edid blocks.",
+                    ));
+            }
+        };
+
+        unsafe {
+            let mut v4l2_edid: v4l2_edid = mem::zeroed();
+            v4l2_edid.blocks = blocks;
+            v4l2_edid.edid = edid.as_mut_ptr();
+
+            v4l2::ioctl(
+                self.handle().fd(),
+                v4l2::vidioc::VIDIOC_S_EDID,
+                &mut v4l2_edid as *mut _ as *mut std::os::raw::c_void,
             )
         }
     }
