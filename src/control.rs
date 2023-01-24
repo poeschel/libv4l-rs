@@ -250,3 +250,22 @@ impl TryInto<v4l2_control> for Control {
         }
     }
 }
+
+impl From<v4l2_event_ctrl> for Control {
+    fn from(event: v4l2_event_ctrl) -> Control {
+        let t = Type::try_from(event.type_);
+        let c;
+        unsafe {
+            c = match t {
+                Ok(Type::Integer) => Control { id: event.type_, value: Value::Integer(event.__bindgen_anon_1.value.into()) },
+                Ok(Type::Boolean) => Control { id: event.type_, value: Value::Boolean(if event.__bindgen_anon_1.value == 0 { false } else { true }) },
+                Ok(Type::Menu) => Control { id: event.type_, value: Value::None },
+                Ok(Type::Button) => Control { id: event.type_, value: Value::None },
+                Ok(Type::Integer64) => Control { id: event.type_, value: Value::Integer(event.__bindgen_anon_1.value64) },
+                _ => Control { id: event.type_, value: Value::None },
+            };
+        }
+
+        c
+    }
+}

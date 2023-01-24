@@ -25,6 +25,8 @@ pub enum FieldOrder {
     InterlacedTB = 8,
     /// both fields interlaced, starts with bottom
     InterlacedBT = 9,
+    /// an field order not known to v4l-rs
+    Unknown = 0xffffffff
 }
 
 impl fmt::Display for FieldOrder {
@@ -40,6 +42,7 @@ impl fmt::Display for FieldOrder {
             Self::Alternate => write!(f, "alternate between fields"),
             Self::InterlacedTB => write!(f, "interlaced, starting with top"),
             Self::InterlacedBT => write!(f, "interlaced, starting with bottom"),
+            Self::Unknown => write!(f, "not known to v4l-rs"),
         }
     }
 }

@@ -44,6 +44,15 @@ impl From<timeval> for Timestamp {
     }
 }
 
+impl From<timespec> for Timestamp {
+    fn from(ts: timespec) -> Self {
+        Self {
+            sec: ts.tv_sec as time_t,
+            usec: ts.tv_nsec / 1000 as time_t,
+        }
+    }
+}
+
 impl From<Timestamp> for timeval {
     fn from(timestamp: Timestamp) -> Self {
         Self {

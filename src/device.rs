@@ -1,4 +1,6 @@
+use bitflags::bitflags;
 use std::convert::TryFrom;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::Path;
 use std::sync::Arc;
 use std::{io, mem};
@@ -6,10 +8,260 @@ use std::{io, mem};
 use libc;
 
 use crate::control;
+use crate::format::FieldOrder;
 use crate::v4l2;
 use crate::v4l2::videodev::v4l2_ext_controls;
 use crate::v4l_sys::*;
-use crate::{capability::Capabilities, control::Control};
+use crate::{capability::Capabilities, control::Control, Timestamp};
+
+bitflags!{
+    /// Event Request Flags
+    ///
+    /// Maps to kernel [`V4L2_EVENT_SUB_FL_*`] flags.
+    pub struct EventRequestFlags: u32 {
+        const NONE = 0;
+        const SEND_INITIAL = (1 << 0);
+        const ALLOW_FEEDBACK = (1 << 1);
+    }
+}
+
+impl From<u32> for EventRequestFlags {
+    fn from(flags: u32) -> Self {
+        Self::from_bits_truncate(flags)
+    }
+}
+
+impl From<EventRequestFlags> for u32 {
+    fn from(flags: EventRequestFlags) -> Self {
+        flags.bits()
+    }
+}
+
+/// V4L2 Event Types
+///
+/// Maps to kernel [`V4L2_EVENT_*`] event types.
+#[repr(u32)]
+pub enum V4l2EventType {
+    All = 0,
+    Vsync = 1,
+    Eos = 2,
+    Ctrl = 3,
+    FrameSync = 4,
+    SourceChange = 5,
+    MotionDet = 6,
+    Unknown = 0xffffffff
+}
+
+impl From<u32> for V4l2EventType {
+    fn from(val: u32) -> V4l2EventType {
+        match val {
+            0 => V4l2EventType::All,
+            1 => V4l2EventType::Vsync,
+            2 => V4l2EventType::Eos,
+            3 => V4l2EventType::Ctrl,
+            4 => V4l2EventType::FrameSync,
+            5 => V4l2EventType::SourceChange,
+            6 => V4l2EventType::MotionDet,
+            _ => V4l2EventType::Unknown,
+        }
+    }
+}
+
+#[derive(Debug)]
+#[repr(u32)]
+pub enum CtrlEventChanges {
+    Value = (1 << 0),
+    Flags = (1 << 1),
+    Range = (1 << 2),
+    Unknown = 0xffffffff
+}
+
+impl From<u32> for CtrlEventChanges {
+    fn from(val: u32) -> CtrlEventChanges {
+        match val {
+            1 => CtrlEventChanges::Value,
+            2 => CtrlEventChanges::Flags,
+            4 => CtrlEventChanges::Range,
+            _ => CtrlEventChanges::Unknown
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct CtrlEvent {
+    changes: CtrlEventChanges,
+    control: Control,
+    flags: control::Flags,
+    minimum: i32,
+    maximum: i32,
+    step: i32,
+    default_value: i32
+}
+
+#[derive(Debug)]
+#[repr(u32)]
+pub enum SrcEvent {
+    ChResolution = 1,
+    Unknown = 0xffffffff
+}
+
+impl From<u32> for SrcEvent {
+    fn from(val: u32) -> SrcEvent {
+        match val {
+            1 => SrcEvent::ChResolution,
+            _ => SrcEvent::Unknown
+        }
+    }
+}
+
+#[derive(Debug)]
+#[repr(u32)]
+pub enum MotionDetEventFlag {
+    HaveFrameSeq = 1,
+    Unknown = 0xffffffff
+}
+
+impl From<u32> for MotionDetEventFlag {
+    fn from(val: u32) -> MotionDetEventFlag {
+        match val {
+            1 => MotionDetEventFlag::HaveFrameSeq,
+            _ => MotionDetEventFlag::Unknown
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct MotionDetEvent {
+    flags: MotionDetEventFlag,
+    frame_sequence: u32,
+    region_mask: u32
+}
+
+#[derive(Debug)]
+pub enum V4l2Event {
+    Vsync(FieldOrder),
+    Ctrl(CtrlEvent),
+    FrameSync(u32),
+    SourceChange(SrcEvent),
+    MotionDet(MotionDetEvent)
+}
+
+impl From<v4l2_event_vsync> for V4l2Event {
+    fn from(event: v4l2_event_vsync) -> V4l2Event {
+        V4l2Event::Vsync(FieldOrder::try_from(event.field as u32).unwrap_or(FieldOrder::Unknown))
+    }
+}
+
+impl From<v4l2_event_ctrl> for V4l2Event {
+    fn from(event: v4l2_event_ctrl) -> V4l2Event {
+        V4l2Event::Ctrl(CtrlEvent {
+            changes: CtrlEventChanges::from(event.changes),
+            control: Control::from(event),
+            flags: control::Flags::from(event.flags),
+            minimum: event.minimum,
+            maximum: event.maximum,
+            step: event.step,
+            default_value: event.default_value
+
+        })
+    }
+}
+
+impl From<v4l2_event_frame_sync> for V4l2Event {
+    fn from(event: v4l2_event_frame_sync) -> V4l2Event {
+        V4l2Event::FrameSync(event.frame_sequence)
+    }
+}
+
+impl From<v4l2_event_src_change> for V4l2Event {
+    fn from(event: v4l2_event_src_change) -> V4l2Event {
+        V4l2Event::SourceChange(SrcEvent::from(event.changes))
+    }
+}
+
+impl From<v4l2_event_motion_det> for V4l2Event {
+    fn from(event: v4l2_event_motion_det) -> V4l2Event {
+        V4l2Event::MotionDet(MotionDetEvent{
+            flags: MotionDetEventFlag::from(event.flags),
+            frame_sequence: event.frame_sequence,
+            region_mask: event.region_mask
+        })
+    }
+}
+
+impl From<v4l2_event> for V4l2Event {
+    fn from(event: v4l2_event) -> V4l2Event {
+        unsafe {
+            match V4l2EventType::from(event.type_) {
+                V4l2EventType::Vsync => V4l2Event::from(event.u.vsync),
+                V4l2EventType::Ctrl => V4l2Event::from(event.u.ctrl),
+                V4l2EventType::FrameSync => V4l2Event::from(event.u.frame_sync),
+                V4l2EventType::SourceChange => V4l2Event::from(event.u.src_change),
+                V4l2EventType::MotionDet => V4l2Event::from(event.u.motion_det),
+                _ => panic!()
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct V4l2BaseEvent {
+    event: V4l2Event,
+    pending: u32,
+    sequence: u32,
+    timestamp: Timestamp,
+    id: u32
+
+}
+
+pub struct V4l2EventHandle {
+    handle: Arc<Handle>
+}
+
+impl V4l2EventHandle {
+    pub fn get_event(&mut self) -> io::Result<V4l2BaseEvent> {
+        let res = self.handle.poll(libc::POLLPRI, -1)?;
+        unsafe {
+            let mut v4l2_event: v4l2_event = mem::zeroed();
+            v4l2::ioctl(
+                self.handle.fd,
+                v4l2::vidioc::VIDIOC_DQEVENT,
+                &mut v4l2_event as *mut _ as *mut std::os::raw::c_void,
+            )?;
+
+            let pending = v4l2_event.pending;
+            let sequence = v4l2_event.sequence;
+            let timestamp = Timestamp::from(v4l2_event.timestamp);
+            let id = v4l2_event.id;
+            let event = V4l2Event::from(v4l2_event);
+            Ok(V4l2BaseEvent {
+                event,
+                pending,
+                sequence,
+                timestamp,
+                id
+            })
+        }
+    }
+}
+
+/* TODO: Can this work? Am i using the Arc<Handle> right here? */
+impl AsRawFd for V4l2EventHandle {
+    fn as_raw_fd(&self) -> RawFd {
+        self.handle.fd.clone()
+    }
+}
+
+impl Iterator for V4l2EventHandle {
+    type Item = io::Result<V4l2BaseEvent>;
+
+    fn next(&mut self) -> Option<io::Result<V4l2BaseEvent>> {
+        match self.get_event() {
+            Ok(event) => Some(Ok(event)),
+            Err(e) => Some(Err(e))
+        }
+    }
+}
 
 /// Linux capture device abstraction
 pub struct Device {
@@ -388,6 +640,28 @@ impl Device {
                 &mut v4l2_edid as *mut _ as *mut std::os::raw::c_void,
             )
         }
+    }
+
+    pub fn events(&self, r#type: V4l2EventType, flags: EventRequestFlags) -> io::Result<V4l2EventHandle> {
+        unsafe {
+            let mut sub = v4l2_event_subscription {
+                type_: r#type as u32,
+                id: 0,
+                flags: u32::from(flags),
+                reserved: mem::zeroed()
+            };
+
+            v4l2::ioctl(
+                self.handle().fd(),
+                v4l2::vidioc::VIDIOC_SUBSCRIBE_EVENT,
+                &mut sub as *mut _ as *mut std::os::raw::c_void,
+            );
+
+            Ok(V4l2EventHandle {
+                handle: self.handle.clone()
+            })
+        }
+
     }
 }
 
