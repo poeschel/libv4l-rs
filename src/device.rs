@@ -1,9 +1,24 @@
 use bitflags::bitflags;
+#[cfg(feature = "async-tokio")]
+#[cfg_attr(docsrs, doc(cfg(feature = "async-tokio")))]
+use futures::ready;
+#[cfg(feature = "async-tokio")]
+#[cfg_attr(docsrs, doc(cfg(feature = "async-tokio")))]
+use futures::stream::Stream;
 use std::convert::TryFrom;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::Path;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::{io, mem};
+use std::task::{Context, Poll};
+
+#[cfg(feature = "async-tokio")]
+#[cfg_attr(docsrs, doc(cfg(feature = "async-tokio")))]
+use tokio::io::unix::{AsyncFd, TryIoError};
+#[cfg(feature = "async-tokio")]
+#[cfg_attr(docsrs, doc(cfg(feature = "async-tokio")))]
+use tokio::io::Interest;
 
 use libc;
 
@@ -220,7 +235,9 @@ pub struct V4l2EventHandle {
 
 impl V4l2EventHandle {
     pub fn get_event(&mut self) -> io::Result<V4l2BaseEvent> {
-        let res = self.handle.poll(libc::POLLPRI, -1)?;
+        println!("get_event vor poll");
+        let _res = self.handle.poll(libc::POLLPRI, -1)?;
+        println!("nach poll");
         unsafe {
             let mut v4l2_event: v4l2_event = mem::zeroed();
             v4l2::ioctl(
@@ -248,7 +265,8 @@ impl V4l2EventHandle {
 /* TODO: Can this work? Am i using the Arc<Handle> right here? */
 impl AsRawFd for V4l2EventHandle {
     fn as_raw_fd(&self) -> RawFd {
-        self.handle.fd.clone()
+        println!("V4l2EventHandle::as_raw_fd()");
+        self.handle.fd
     }
 }
 
@@ -256,9 +274,64 @@ impl Iterator for V4l2EventHandle {
     type Item = io::Result<V4l2BaseEvent>;
 
     fn next(&mut self) -> Option<io::Result<V4l2BaseEvent>> {
+        println!("V4l2EventHandle::next()");
         match self.get_event() {
             Ok(event) => Some(Ok(event)),
             Err(e) => Some(Err(e))
+        }
+    }
+}
+
+#[cfg(feature = "async-tokio")]
+#[cfg_attr(docsrs, doc(cfg(feature = "async-tokio")))]
+pub struct AsyncV4l2EventHandle {
+    asyncfd: AsyncFd<V4l2EventHandle>
+}
+
+#[cfg(feature = "async-tokio")]
+#[cfg_attr(docsrs, doc(cfg(feature = "async-tokio")))]
+impl AsyncV4l2EventHandle {
+    pub fn new(handle: V4l2EventHandle) -> io::Result<AsyncV4l2EventHandle> {
+        println!("AsyncV4l2EventHandle::new()");
+        let fd;
+        unsafe {
+            fd = handle.handle.fd;
+            let flags = libc::fcntl(fd, libc::F_GETFL, 0);
+            libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+        }
+
+        println!("AsyncV4l2EventHandle::new() almost done fd:{}", fd);
+        Ok(AsyncV4l2EventHandle{
+            asyncfd: AsyncFd::with_interest(V4l2EventHandle{ handle: Arc::new(Handle::new(fd)) }, Interest::PRIORITY)?
+        })
+    }
+}
+
+#[cfg(feature = "async-tokio")]
+#[cfg_attr(docsrs, doc(cfg(feature = "async-tokio")))]
+impl Stream for AsyncV4l2EventHandle {
+    type Item = io::Result<V4l2BaseEvent>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        println!("poll_next()");
+        loop {
+            println!("vor guard ready");
+            let mut guard = ready!(self.asyncfd.poll_priority_ready_mut(cx))?;
+            println!("nach guard ready");
+            match guard.try_io(|inner| inner.get_mut().get_event()) {
+                Err(TryIoError { .. }) => {
+                    println!("Err(TryIoError)");
+                    continue;
+                },
+                Ok(Ok(event)) => {
+                    println!("Ok(Ok(event))");
+                    return Poll::Ready(Some(Ok(event)));
+                },
+                Ok(Err(err)) => {
+                    println!("Ok(Err(err))");
+                    return Poll::Ready(Some(Err(err.into())));
+                }
+            }
         }
     }
 }
@@ -663,6 +736,14 @@ impl Device {
         }
 
     }
+
+
+    #[cfg(feature = "async-tokio")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "async-tokio")))]
+    pub fn async_events(&self, r#type: V4l2EventType, flags: EventRequestFlags) -> io::Result<AsyncV4l2EventHandle> {
+        let events = self.events(r#type, flags)?;
+        Ok(AsyncV4l2EventHandle::new(events)?)
+    }
 }
 
 impl io::Read for Device {
@@ -757,5 +838,11 @@ impl Handle {
 impl Drop for Handle {
     fn drop(&mut self) {
         v4l2::close(self.fd).unwrap();
+    }
+}
+
+impl AsRawFd for Handle {
+    fn as_raw_fd(&self) -> RawFd {
+        self.fd
     }
 }
