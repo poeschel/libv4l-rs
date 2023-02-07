@@ -221,11 +221,11 @@ impl From<v4l2_event> for V4l2Event {
 
 #[derive(Debug)]
 pub struct V4l2BaseEvent {
-    event: V4l2Event,
-    pending: u32,
-    sequence: u32,
-    timestamp: Timestamp,
-    id: u32
+    pub event: V4l2Event,
+    pub pending: u32,
+    pub sequence: u32,
+    pub timestamp: Timestamp,
+    pub id: u32
 
 }
 
