@@ -86,6 +86,7 @@ pub mod frameinterval;
 pub mod framesize;
 pub mod memory;
 pub mod parameters;
+pub mod subdevice;
 pub mod timestamp;
 pub mod video;
 

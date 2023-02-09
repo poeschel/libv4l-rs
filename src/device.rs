@@ -8,10 +8,8 @@ use futures::stream::Stream;
 use std::convert::TryFrom;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::Path;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::{io, mem};
-use std::task::{Context, Poll};
 
 #[cfg(feature = "async-tokio")]
 #[cfg_attr(docsrs, doc(cfg(feature = "async-tokio")))]
@@ -502,7 +500,6 @@ impl Device {
                 &mut v4l2_edid as *mut _ as *mut std::os::raw::c_void,
             )?;
 
-            println!("edid.blocks:{}", v4l2_edid.blocks);
             let blocks = match usize::try_from(v4l2_edid.blocks * 128) {
                 Ok(b) => b,
                 Err(_e) => {
@@ -793,7 +790,7 @@ pub struct Handle {
 }
 
 impl Handle {
-    fn new(fd: std::os::raw::c_int) -> Self {
+    pub (crate) fn new(fd: std::os::raw::c_int) -> Self {
         Self { fd }
     }
 

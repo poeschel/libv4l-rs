@@ -154,3 +154,21 @@ impl From<Format> for v4l2_pix_format {
         }
     }
 }
+
+impl From<v4l2_mbus_framefmt> for Format {
+    fn from(fmt: v4l2_mbus_framefmt) -> Self {
+        Self {
+            width: fmt.width,
+            height: fmt.height,
+            fourcc: FourCC::from(fmt.code),
+            field_order: FieldOrder::try_from(fmt.field).expect("Invalid field order"),
+            stride: 0,
+            size: 0,
+            flags: Flags::empty(),
+            colorspace: Colorspace::try_from(fmt.colorspace).expect("Invalid colorspace"),
+            quantization: Quantization::try_from(fmt.quantization).expect("Invalid quantization"),
+            transfer: TransferFunction::try_from(fmt.xfer_func).expect("Invalid transfer function"),
+        }
+    }
+}
+

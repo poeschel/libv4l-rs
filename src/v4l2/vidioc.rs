@@ -8,26 +8,28 @@ pub type _IOC_TYPE = std::os::raw::c_ulong;
 pub type _IOC_TYPE = std::os::raw::c_int;
 
 // linux ioctl.h
-const _IOC_NRBITS: u8 = 8;
-const _IOC_TYPEBITS: u8 = 8;
+pub (crate) const _IOC_NRBITS: u8 = 8;
+pub (crate) const _IOC_TYPEBITS: u8 = 8;
 
-const _IOC_SIZEBITS: u8 = 14;
+pub (crate) const _IOC_SIZEBITS: u8 = 14;
 
-const _IOC_NRSHIFT: u8 = 0;
-const _IOC_TYPESHIFT: u8 = _IOC_NRSHIFT + _IOC_NRBITS;
-const _IOC_SIZESHIFT: u8 = _IOC_TYPESHIFT + _IOC_TYPEBITS;
-const _IOC_DIRSHIFT: u8 = _IOC_SIZESHIFT + _IOC_SIZEBITS;
+pub (crate) const _IOC_NRSHIFT: u8 = 0;
+pub (crate) const _IOC_TYPESHIFT: u8 = _IOC_NRSHIFT + _IOC_NRBITS;
+pub (crate) const _IOC_SIZESHIFT: u8 = _IOC_TYPESHIFT + _IOC_TYPEBITS;
+pub (crate) const _IOC_DIRSHIFT: u8 = _IOC_SIZESHIFT + _IOC_SIZEBITS;
 
-const _IOC_NONE: u8 = 0;
-const _IOC_WRITE: u8 = 1;
-const _IOC_READ: u8 = 2;
+pub (crate) const _IOC_NONE: u8 = 0;
+pub (crate) const _IOC_WRITE: u8 = 1;
+pub (crate) const _IOC_READ: u8 = 2;
 
+#[macro_export]
 macro_rules! _IOC_TYPECHECK {
     ($type:ty) => {
         std::mem::size_of::<$type>()
     };
 }
 
+#[macro_export]
 macro_rules! _IOC {
     ($dir:expr, $type:expr, $nr:expr, $size:expr) => {
         (($dir as _IOC_TYPE) << $crate::v4l2::vidioc::_IOC_DIRSHIFT)
@@ -43,6 +45,7 @@ macro_rules! _IO {
     };
 }
 
+#[macro_export]
 macro_rules! _IOR {
     ($type:expr, $nr:expr, $size:ty) => {
         _IOC!(
@@ -54,6 +57,7 @@ macro_rules! _IOR {
     };
 }
 
+#[macro_export]
 macro_rules! _IOW {
     ($type:expr, $nr:expr, $size:ty) => {
         _IOC!(
@@ -65,6 +69,7 @@ macro_rules! _IOW {
     };
 }
 
+#[macro_export]
 macro_rules! _IOWR {
     ($type:expr, $nr:expr, $size:ty) => {
         _IOC!(

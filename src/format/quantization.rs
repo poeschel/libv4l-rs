@@ -2,7 +2,7 @@ use std::convert::TryFrom;
 use std::fmt;
 
 #[derive(Debug, Copy, Clone)]
-#[repr(u32)]
+#[repr(u16)]
 /// Quantization for the colorspace.
 ///
 /// The driver decides this for capture streams and the user sets
@@ -22,6 +22,19 @@ impl fmt::Display for Quantization {
             Self::Default => write!(f, "default"),
             Self::FullRange => write!(f, "full range"),
             Self::LimitedRange => write!(f, "limited range"),
+        }
+    }
+}
+
+impl TryFrom<u16> for Quantization {
+    type Error = ();
+
+    fn try_from(code: u16) -> Result<Self, Self::Error> {
+        match code {
+            0 => Ok(Self::Default),
+            1 => Ok(Self::FullRange),
+            2 => Ok(Self::LimitedRange),
+            _ => Err(()),
         }
     }
 }

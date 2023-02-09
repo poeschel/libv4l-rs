@@ -2,7 +2,7 @@ use std::convert::TryFrom;
 use std::fmt;
 
 #[derive(Debug, Copy, Clone)]
-#[repr(u32)]
+#[repr(u16)]
 /// Transfer function for the colorspace. The driver decides this for capture streams and the user
 /// sets it for output streams.
 pub enum TransferFunction {
@@ -35,6 +35,24 @@ impl fmt::Display for TransferFunction {
             Self::None => write!(f, "No transfer function"),
             Self::DCIP3 => write!(f, "DCI-P3 transfer function"),
             Self::SMPTE2084 => write!(f, "SMPTE 2084 transfer function"),
+        }
+    }
+}
+
+impl TryFrom<u16> for TransferFunction {
+    type Error = ();
+
+    fn try_from(colorspace_code: u16) -> Result<Self, Self::Error> {
+        match colorspace_code {
+            0 => Ok(Self::Default),
+            1 => Ok(Self::Rec709),
+            2 => Ok(Self::SRGB),
+            3 => Ok(Self::OPRGB),
+            4 => Ok(Self::SMPTE240M),
+            5 => Ok(Self::None),
+            6 => Ok(Self::DCIP3),
+            7 => Ok(Self::SMPTE2084),
+            _ => Err(()),
         }
     }
 }
