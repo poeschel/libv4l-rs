@@ -7,8 +7,14 @@ use futures::ready;
 use futures::stream::Stream;
 use std::convert::TryFrom;
 use std::os::unix::io::{AsRawFd, RawFd};
+#[cfg(feature = "async-tokio")]
+#[cfg_attr(docsrs, doc(cfg(feature = "async-tokio")))]
+use std::pin::Pin;
 use std::path::Path;
 use std::sync::Arc;
+#[cfg(feature = "async-tokio")]
+#[cfg_attr(docsrs, doc(cfg(feature = "async-tokio")))]
+use std::task::{Context, Poll};
 use std::{io, mem};
 
 #[cfg(feature = "async-tokio")]
@@ -102,13 +108,13 @@ impl From<u32> for CtrlEventChanges {
 
 #[derive(Debug)]
 pub struct CtrlEvent {
-    changes: CtrlEventChanges,
-    control: Control,
-    flags: control::Flags,
-    minimum: i32,
-    maximum: i32,
-    step: i32,
-    default_value: i32
+    pub changes: CtrlEventChanges,
+    pub control: Control,
+    pub flags: control::Flags,
+    pub minimum: i32,
+    pub maximum: i32,
+    pub step: i32,
+    pub default_value: i32
 }
 
 #[derive(Debug)]
@@ -145,9 +151,9 @@ impl From<u32> for MotionDetEventFlag {
 
 #[derive(Debug)]
 pub struct MotionDetEvent {
-    flags: MotionDetEventFlag,
-    frame_sequence: u32,
-    region_mask: u32
+    pub flags: MotionDetEventFlag,
+    pub frame_sequence: u32,
+    pub region_mask: u32
 }
 
 #[derive(Debug)]
@@ -260,7 +266,6 @@ impl V4l2EventHandle {
     }
 }
 
-/* TODO: Can this work? Am i using the Arc<Handle> right here? */
 impl AsRawFd for V4l2EventHandle {
     fn as_raw_fd(&self) -> RawFd {
         println!("V4l2EventHandle::as_raw_fd()");
@@ -290,17 +295,8 @@ pub struct AsyncV4l2EventHandle {
 #[cfg_attr(docsrs, doc(cfg(feature = "async-tokio")))]
 impl AsyncV4l2EventHandle {
     pub fn new(handle: V4l2EventHandle) -> io::Result<AsyncV4l2EventHandle> {
-        println!("AsyncV4l2EventHandle::new()");
-        let fd;
-        unsafe {
-            fd = handle.handle.fd;
-            let flags = libc::fcntl(fd, libc::F_GETFL, 0);
-            libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
-        }
-
-        println!("AsyncV4l2EventHandle::new() almost done fd:{}", fd);
         Ok(AsyncV4l2EventHandle{
-            asyncfd: AsyncFd::with_interest(V4l2EventHandle{ handle: Arc::new(Handle::new(fd)) }, Interest::PRIORITY)?
+            asyncfd: AsyncFd::with_interest(handle, Interest::PRIORITY)?
         })
     }
 }
@@ -311,22 +307,18 @@ impl Stream for AsyncV4l2EventHandle {
     type Item = io::Result<V4l2BaseEvent>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        println!("poll_next()");
         loop {
-            println!("vor guard ready");
             let mut guard = ready!(self.asyncfd.poll_priority_ready_mut(cx))?;
-            println!("nach guard ready");
-            match guard.try_io(|inner| inner.get_mut().get_event()) {
+            let res = guard.try_io(|inner| inner.get_mut().get_event());
+            guard.clear_ready();
+            match res {
                 Err(TryIoError { .. }) => {
-                    println!("Err(TryIoError)");
                     continue;
                 },
                 Ok(Ok(event)) => {
-                    println!("Ok(Ok(event))");
                     return Poll::Ready(Some(Ok(event)));
                 },
                 Ok(Err(err)) => {
-                    println!("Ok(Err(err))");
                     return Poll::Ready(Some(Err(err.into())));
                 }
             }
@@ -725,7 +717,7 @@ impl Device {
                 self.handle().fd(),
                 v4l2::vidioc::VIDIOC_SUBSCRIBE_EVENT,
                 &mut sub as *mut _ as *mut std::os::raw::c_void,
-            );
+            )?;
 
             Ok(V4l2EventHandle {
                 handle: self.handle.clone()
